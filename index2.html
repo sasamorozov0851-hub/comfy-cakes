@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Comfy Cakes 3D</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #ffeaa7 0%, #ff6b9d 100%);
+        }
+        #canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 60%;
+            z-index: 1;
+        }
+        #ui {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 40%;
+            background: rgba(255, 255, 255, 0.95);
+            border-top-left-radius: 24px;
+            border-top-right-radius: 24px;
+            box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15);
+            padding: 12px;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+        h1 {
+            font-size: 18px;
+            margin: 0 0 6px;
+            text-align: center;
+            color: #2d3436;
+        }
+        .order-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 13px;
+            padding: 6px 10px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            margin-bottom: 6px;
+        }
+        .order-row .progress {
+            font-weight: bold;
+            color: #ff6b9d;
+        }
+        .choices {
+            display: flex;
+            gap: 6px;
+            overflow-x: auto;
+            padding: 6px 0;
+            margin-bottom: 6px;
+        }
+        .choice {
+            min-width: 62px;
+            height: 62px;
+            border-radius: 12px;
+            border: 3px solid transparent;
+            cursor: pointer;
+            transition: transform 0.15s;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: bold;
+            color: #fff;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+        }
+        .choice:active {
+            transform: scale(0.9);
+            border-color: #ff6b9d;
+        }
+        .buttons {
+            display: flex;
+            gap: 8px;
+            margin-top: auto;
+        }
+        .btn {
+            flex: 1;
+            padding: 14px;
+            font-size: 15px;
+            font-weight: bold;
+            border: none;
+            border-radius: 12px;
+            background: #ff6b9d;
+            color: #fff;
+            cursor: pointer;
+            box-shadow: 0 4px 10px rgba(255, 107, 157, 0.3);
+        }
+        .btn:active {
+            transform: scale(0.97);
+        }
+        .btn-secondary {
+            background: #dfe6e9;
+            color: #2d3436;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+        }
+        #result {
+            text-align: center;
+            font-weight: bold;
+            min-height: 22px;
+            font-size: 14px;
+            margin: 4px 0;
+        }
+        .success { color: #00b894; }
+        .error { color: #d63031; }
+    </style>
+</head>
+<body onclick="initAudio()" ontouchstart="initAudio()">
+    <div id="canvas-container"></div>
+
+    <div id="ui">
+        <h1>🎂 Comfy Cakes 3D</h1>
+        <div class="order-row">
+            <span>Заказ:</span>
+            <span id="order-display">—</span>
+            <span class="progress" id="order-progress">0 / 5</span>
+        </div>
+        <div class="choices" id="choices"></div>
+        <div id="result"></div>
+        <div class="buttons">
+            <button class="btn btn-secondary" onclick="resetCake()">🔄 Сброс</button>
+            <button class="btn" onclick="checkCake()">✅ Проверить</button>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // TELEGRAM MINI APP
+        // ==========================================
+        const tg = window.Telegram && window.Telegram.WebApp;
+        if (tg) {
+            tg.expand();
+            tg.ready();
+        }
+
+        // ==========================================
+        // ЗВУКИ (Web Audio API)
+        // ==========================================
+        let audioCtx = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                try {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                } catch (e) {
+                    console.log('Звук не поддерживается');
+                }
+            }
+        }
+
+        function playTone(frequency, duration, type, volume) {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+
+            osc.type = type || 'sine';
+            osc.frequency.value = frequency;
+
+            gain.gain.setValueAtTime(volume || 0.3, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            osc.start();
+            osc.stop(audioCtx.currentTime + duration);
+        }
+
+        function soundClick() {
+            playTone(800, 0.08, 'sine', 0.2);
+        }
+
+        function soundCorrect() {
+            playTone(523, 0.12, 'sine', 0.3);
+            setTimeout(function () { playTone(659, 0.12, 'sine', 0.3); }, 90);
+            setTimeout(function () { playTone(784, 0.25, 'sine', 0.3); }, 180);
+        }
+
+        function soundError() {
+            playTone(180, 0.25, 'sawtooth', 0.25);
+            setTimeout(function () { playTone(150, 0.3, 'sawtooth', 0.25); }, 150);
+        }
+
+        function soundWin() {
+            const notes = [523, 659, 784, 1046, 1318, 1568];
+            for (let i = 0; i < notes.length; i++) {
+                (function (note, delay) {
+                    setTimeout(function () { playTone(note, 0.2, 'sine', 0.3); }, delay);
+                })(notes[i], i * 130);
+            }
+        }
+
+        function soundPick() {
+            playTone(1000, 0.05, 'triangle', 0.15);
+        }
+
+        // ==========================================
+        // THREE.JS — СЦЕНА
+        // ==========================================
+        const container = document.getElementById('canvas-container');
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xfdf6e3);
+
+        const camera = new THREE.PerspectiveCamera(
+            45,
+            container.clientWidth / container.clientHeight,
+            0.1,
+            100
+        );
+        camera.position.set(5, 5, 8);
+        camera.lookAt(0, 1, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.shadowMap.enabled = true;
+        container.appendChild(renderer.domElement);
+
+        // ==========================================
+        // СВЕТ
+        // ==========================================
+        const ambient = new THREE.AmbientLight(0xffffff, 0.7);
+        scene.add(ambient);
+
+        const directional = new THREE.DirectionalLight(0xffffff, 0.8);
+        directional.position.set(5, 10, 7);
+        directional.castShadow = true;
+        scene.add(directional);
+
+        const pointLight = new THREE.PointLight(0xffddaa, 0.5, 20);
+        pointLight.position.set(-3, 5, 3);
+        scene.add(pointLight);
+
+        // ==========================================
+        // ПОДСТАВКА (квадратная)
+        // ==========================================
+        const plateGeometry = new THREE.BoxGeometry(3.5, 0.15, 3.5);
+        const plateMaterial = new THREE.MeshPhongMaterial({
+            color: 0xffffff,
+            shininess: 100,
+            specular: 0x888888
+        });
+        const plate = new THREE.Mesh(plateGeometry, plateMaterial);
+        plate.position.y = 0;
+        plate.receiveShadow = true;
+        scene.add(plate);
+
+        // ==========================================
+        // МАТЕРИАЛЫ
+        // ==========================================
+        const LAYERS = [
+            { name: 'Шоколад', color: 0x8B4513 },
+            { name: 'Ваниль', color: 0xFFFACD },
+            { name: 'Клубника', color: 0xFF6B6B },
+            { name: 'Матча', color: 0x90EE90 }
+        ];
+
+        const TOPPINGS = [
+            { name: 'Вишня', color: 0xDC143C },
+            { name: 'Шоколад', color: 0x3E2723 },
+            { name: 'Карамель', color: 0xDAA520 },
+            { name: 'Крем', color: 0xFFF8DC }
+        ];
+
+        // ==========================================
+        // СОСТОЯНИЕ
+        // ==========================================
+        let currentOrder = [];
+        let myCake = [];
+        let progress = 0;
+        let cakeMeshes = [];
+
+        // ==========================================
+        // СОЗДАНИЕ МЕШЕЙ
+        // ==========================================
+        function createLayerMesh(layer, yPosition) {
+            const geometry = new THREE.BoxGeometry(3, 0.5, 3);
+            const material = new THREE.MeshPhongMaterial({
+                color: layer.color,
+                shininess: 30
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.position.y = yPosition;
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            return mesh;
+        }
+
+        function createToppingMesh(topping, yPosition) {
+            const geometry = new THREE.SphereGeometry(0.4, 32, 32);
+            const material = new THREE.MeshPhongMaterial({
+                color: topping.color,
+                shininess: 80
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.position.set(0, yPosition, 0);
+            mesh.castShadow = true;
+            return mesh;
+        }
+
+        function rebuildCake() {
+            for (let i = 0; i < cakeMeshes.length; i++) {
+                scene.remove(cakeMeshes[i]);
+            }
+            cakeMeshes = [];
+
+            let y = 0.4;
+            for (let i = 0; i < myCake.length; i++) {
+                const item = myCake[i];
+                let mesh;
+
+                if (item.type === 'layer') {
+                    mesh = createLayerMesh(item.data, y);
+                    y += 0.5;
+                } else {
+                    mesh = createToppingMesh(item.data, y + 0.25);
+                    y += 0.5;
+                }
+
+                scene.add(mesh);
+                cakeMeshes.push(mesh);
+            }
+        }
+
+        // ==========================================
+        // ЛОГИКА
+        // ==========================================
+        function generateOrder() {
+            const layer1 = LAYERS[Math.floor(Math.random() * LAYERS.length)];
+            const layer2 = LAYERS[Math.floor(Math.random() * LAYERS.length)];
+            const topping = TOPPINGS[Math.floor(Math.random() * TOPPINGS.length)];
+
+            currentOrder = [
+                { type: 'layer', data: layer1 },
+                { type: 'layer', data: layer2 },
+                { type: 'topping', data: topping }
+            ];
+
+            myCake = [];
+            rebuildCake();
+
+            const display = document.getElementById('order-display');
+            display.innerText = currentOrder
+                .map(function (item) { return item.data.name; })
+                .join(' → ');
+
+            document.getElementById('result').innerText = '';
+            document.getElementById('result').className = '';
+
+            const choices = document.getElementById('choices');
+            choices.innerHTML = '';
+
+            const allItems = [];
+            for (let i = 0; i < LAYERS.length; i++) {
+                allItems.push({ type: 'layer', data: LAYERS[i] });
+            }
+            for (let i = 0; i < TOPPINGS.length; i++) {
+                allItems.push({ type: 'topping', data: TOPPINGS[i] });
+            }
+
+            for (let i = 0; i < allItems.length; i++) {
+                const item = allItems[i];
+                const btn = document.createElement('div');
+                btn.className = 'choice';
+                btn.style.background = '#' + item.data.color.toString(16).padStart(6, '0');
+                btn.innerText = item.data.name;
+                btn.onclick = (function (it) {
+                    return function () {
+                        addToCake(it);
+                    };
+                })(item);
+                choices.appendChild(btn);
+            }
+        }
+
+        function addToCake(item) {
+            if (myCake.length >= 3) return;
+            myCake.push(item);
+            rebuildCake();
+            soundPick();
+        }
+
+        function checkCake() {
+            const result = document.getElementById('result');
+
+            if (myCake.length !== currentOrder.length) {
+                result.className = 'error';
+                result.innerText = '⚠️ Собери торт полностью!';
+                soundError();
+                return;
+            }
+
+            let correct = true;
+            for (let i = 0; i < currentOrder.length; i++) {
+                if (myCake[i].data.name !== currentOrder[i].data.name) {
+                    correct = false;
+                    break;
+                }
+            }
+
+            if (correct) {
+                progress++;
+                document.getElementById('order-progress').innerText = progress + ' / 5';
+                result.className = 'success';
+
+                if (progress >= 5) {
+                    result.innerText = '🏆 ПОБЕДА! 5 тортов!';
+                    soundWin();
+                    return;
+                }
+
+                result.innerText = '🎉 Правильно!';
+                soundCorrect();
+                setTimeout(generateOrder, 1200);
+            } else {
+                result.className = 'error';
+                result.innerText = '❌ Неправильно!';
+                soundError();
+            }
+        }
+
+        function resetCake() {
+            myCake = [];
+            rebuildCake();
+            document.getElementById('result').innerText = '';
+            soundClick();
+        }
+
+        // ==========================================
+        // ВРАЩЕНИЕ СЦЕНЫ
+        // ==========================================
+        let isDragging = false;
+        let previousX = 0;
+        let targetRotation = 0;
+
+        container.addEventListener('touchstart', function (e) {
+            isDragging = true;
+            previousX = e.touches[0].clientX;
+        });
+
+        container.addEventListener('touchmove', function (e) {
+            if (!isDragging) return;
+            const deltaX = e.touches[0].clientX - previousX;
+            targetRotation += deltaX * 0.01;
+            previousX = e.touches[0].clientX;
+        });
+
+        container.addEventListener('touchend', function () {
+            isDragging = false;
+        });
+
+        container.addEventListener('mousedown', function (e) {
+            isDragging = true;
+            previousX = e.clientX;
+        });
+
+        container.addEventListener('mousemove', function (e) {
+            if (!isDragging) return;
+            const deltaX = e.clientX - previousX;
+            targetRotation += deltaX * 0.01;
+            previousX = e.clientX;
+        });
+
+        container.addEventListener('mouseup', function () {
+            isDragging = false;
+        });
+
+        // ==========================================
+        // АНИМАЦИЯ
+        // ==========================================
+        function animate() {
+            requestAnimationFrame(animate);
+
+            scene.rotation.y += (targetRotation - scene.rotation.y) * 0.1;
+
+            for (let i = 0; i < cakeMeshes.length; i++) {
+                cakeMeshes[i].rotation.y += 0.005;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // ==========================================
+        // РЕСАЙЗ
+        // ==========================================
+        window.addEventListener('resize', function () {
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        });
+
+        // ==========================================
+        // СТАРТ
+        // ==========================================
+        generateOrder();
+    </script>
+</body>
+</html>
